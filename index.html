@@ -126,29 +126,22 @@
 let fullProcessedData = [];
 let charts = {};
 
-// ======================= NOVO MÉTODO DE CARREGAMENTO =======================
-// Executa o script quando o conteúdo da página estiver totalmente carregado.
 window.addEventListener('DOMContentLoaded', () => {
-    const csvFilePath = 'listagem.csv'; // O nome do arquivo CSV
+    const csvFilePath = 'listagem.csv'; 
 
     Papa.parse(csvFilePath, {
-        download: true, // Essencial para buscar o arquivo da URL/caminho
-        header: true,
-        skipEmptyLines: true,
+        download: true, header: true, skipEmptyLines: true,
         complete: function(results) {
-            // Oculta a mensagem de carregamento e processa os dados
             document.getElementById('loading-message').style.display = 'none';
             const dashboardData = processData(results.data);
             renderDashboard(dashboardData);
         },
         error: function(error) {
-            // Exibe uma mensagem de erro se não conseguir encontrar ou ler o arquivo
             document.getElementById('loading-message').innerText = 'Erro ao carregar o arquivo listagem.csv. Verifique se o arquivo está no local correto e não contém erros.';
             console.error("Erro ao processar o CSV:", error);
         }
     });
 });
-// =========================================================================
 
 function destroyChart(chartId) { if (charts[chartId]) { charts[chartId].destroy(); } }
 
@@ -181,20 +174,26 @@ function processData(data) {
         else if (curr.age <= 59) acc.adults++; else acc.seniors++;
         return acc;
     }, { children: 0, teens: 0, adults: 0, seniors: 0 });
+    
     return {
         totalRequests: processed.length, uniquePatients: new Set(processed.map(p => p.cartaoSUS).filter(Boolean)).size,
         ageGroupCounts,
         requestsByCategory: processed.reduce((acc, curr) => { acc[curr.categoria] = (acc[curr.categoria] || 0) + 1; return acc; }, {}),
+        
+        // ======================= ALTERAÇÃO REALIZADA AQUI =======================
         ageDistribution: validAges.reduce((acc, curr) => {
-            let group = '91+';
-            if (curr.age <= 10) group = '0-10'; else if (curr.age <= 20) group = '11-20';
-            else if (curr.age <= 30) group = '21-30'; else if (curr.age <= 40) group = '31-40';
-            else if (curr.age <= 50) group = '41-50'; else if (curr.age <= 60) group = '51-60';
-            else if (curr.age <= 70) group = '61-70'; else if (curr.age <= 80) group = '71-80';
-            else if (curr.age <= 90) group = '81-90';
-            acc[group] = (acc[group] || 0) + 1;
+            if (curr.age >= 90) {
+                acc['90+'] = (acc['90+'] || 0) + 1;
+            } else {
+                const startOfDecade = Math.floor(curr.age / 10) * 10;
+                const endOfDecade = startOfDecade + 9;
+                const group = `${startOfDecade}-${endOfDecade}`;
+                acc[group] = (acc[group] || 0) + 1;
+            }
             return acc;
         }, {}),
+        // ========================================================================
+        
         requestsOverTime: processed.reduce((acc, curr) => {
             if (curr.dataSolObj) {
                 const monthYear = `${String(curr.dataSolObj.getMonth() + 1).padStart(2, '0')}/${curr.dataSolObj.getFullYear()}`;
@@ -227,12 +226,16 @@ function renderDashboard(data) {
     charts['categoryChart'] = new Chart(categoryCtx, { type: 'bar', data: { labels: sortedCategories.map(item => item[0]), datasets: [{ label: 'Nº de Solicitações', data: sortedCategories.map(item => item[1]), backgroundColor: 'rgba(52, 152, 219, 0.7)' }] },
         options: { ...chartOptions, indexAxis: 'y', plugins: { legend: { display: false }, datalabels: { anchor: 'end', align: 'end', color: '#444', font: { weight: 'bold' } } } }
     });
+    
     destroyChart('ageDistributionChart');
     const ageCtx = document.getElementById('ageDistributionChart').getContext('2d');
-    const ageLabels = ['0-10', '11-20', '21-30', '31-40', '41-50', '51-60', '61-70', '71-80', '81-90', '91+'];
+    // ======================= ALTERAÇÃO REALIZADA AQUI =======================
+    const ageLabels = ['0-9', '10-19', '20-29', '30-39', '40-49', '50-59', '60-69', '70-79', '80-89', '90+'];
+    // ========================================================================
     charts['ageDistributionChart'] = new Chart(ageCtx, { type: 'bar', data: { labels: ageLabels, datasets: [{ label: 'Nº de Pacientes', data: ageLabels.map(label => data.ageDistribution[label] || 0), backgroundColor: 'rgba(46, 204, 113, 0.7)' }] },
         options: { ...chartOptions, maintainAspectRatio: true, plugins: { legend: { display: true }, datalabels: { anchor: 'end', align: 'top', color: '#444', font: { weight: 'bold' } } } }
     });
+    
     destroyChart('requestsOverTimeChart');
     const timeCtx = document.getElementById('requestsOverTimeChart').getContext('2d');
     const sortedTimeData = Object.entries(data.requestsOverTime).sort((a,b) => parseDate(`01/${a[0]}`) - parseDate(`01/${b[0]}`));
