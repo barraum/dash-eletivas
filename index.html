@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard de Análise de Procedimentos Cirúrgicos</title>
+    <!-- Importando as bibliotecas via CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <!-- Plugin para exibir os valores nos gráficos -->
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: #f4f7fa;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1400px;
+            margin: auto;
+        }
+        h1, h2 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .action-btn {
+            background-color: #3498db;
+            color: white;
+            padding: 12px 25px;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            display: inline-block;
+            transition: background-color 0.3s;
+        }
+        .action-btn:hover { background-color: #2980b9; }
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+        }
+        .kpi-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+        .card {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+        }
+        .kpi-card { text-align: center; }
+        .kpi-card h3 { margin: 0 0 10px 0; font-size: 16px; color: #7f8c8d; }
+        .kpi-card .value { font-size: 32px; font-weight: bold; color: #2c3e50; }
+        .full-width { grid-column: 1 / -1; }
+        .chart-container-large { position: relative; height: 600px; }
+        .chart-container-medium { position: relative; height: 400px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { padding: 10px; border: 1px solid #ddd; text-align: left; font-size: 14px; }
+        thead { background-color: #ecf0f1; }
+        tbody tr:nth-child(odd) { background-color: #f9f9f9; }
+        
+        .query-section { text-align: center; }
+        .query-section input {
+            padding: 10px; margin: 5px; border: 1px solid #ccc;
+            border-radius: 4px; font-size: 16px;
+        }
+        #query-result { margin-top: 20px; text-align: left; }
+        .result-item {
+            padding: 15px;
+            border: 1px solid #e0e0e0;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            background-color: #f9f9f9;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Dashboard de Análise de Procedimentos Cirúrgicos</h1>
+    <h2 id="loading-message">Carregando dados do arquivo listagem.csv...</h2>
+
+    <div id="dashboard-content">
+        <h2>1. Visão Geral</h2>
+        <div class="dashboard-grid kpi-grid">
+            <div class="card kpi-card"><h4>Total de Solicitações</h4><p class="value" id="kpi-total-requests">0</p></div>
+            <div class="card kpi-card"><h4>Pacientes Únicos</h4><p class="value" id="kpi-unique-patients">0</p></div>
+            <div class="card kpi-card"><h4>Idade Média (anos)</h4><p class="value" id="kpi-avg-age">0</p></div>
+            <div class="card kpi-card"><h4>Tempo Médio na fila (dias)</h4><p class="value" id="kpi-avg-wait">0</p></div>
+            <div class="card kpi-card"><h4>Solicitação mais antiga (dias)</h4><p class="value" id="kpi-max-wait">0</p></div>
+        </div>
+        
+        <h2>2. Total de AIHs por idade</h2>
+        <div class="dashboard-grid kpi-grid">
+            <div class="card kpi-card"><h4>Crianças (0-12)</h4><p class="value" id="kpi-children">0</p></div>
+            <div class="card kpi-card"><h4>Adolescentes (13-17)</h4><p class="value" id="kpi-teens">0</p></div>
+            <div class="card kpi-card"><h4>Adultos (18-59)</h4><p class="value" id="kpi-adults">0</p></div>
+            <div class="card kpi-card"><h4>Idosos (60+)</h4><p class="value" id="kpi-seniors">0</p></div>
+        </div>
+        
+        <h2 style="margin-top: 40px;">3. Análise Detalhada</h2>
+        <div class="dashboard-grid">
+            <div class="card full-width"><h3>Solicitações por Categoria de Procedimento</h3><div class="chart-container-large"><canvas id="categoryChart"></canvas></div></div>
+            <div class="card full-width"><h3>Distribuição por Faixa Etária</h3><canvas id="ageDistributionChart"></canvas></div>
+            <div class="card full-width"><h3>Volume de Solicitações por Mês/Ano</h3><div class="chart-container-medium"><canvas id="requestsOverTimeChart"></canvas></div></div>
+            <div class="card full-width"><h3>Pacientes na Fila Há Mais Tempo (Top 20)</h3><table id="waitlist-table"><thead><tr><th>Dias na Fila</th><th>Data Solicitação</th><th>Procedimento</th><th>Idade</th><th>Cartão SUS</th></tr></thead><tbody></tbody></table></div>
+        </div>
+
+        <h2 style="margin-top: 40px;">4. Consultar Posição na Fila</h2>
+        <div class="card full-width query-section">
+            <p>Digite o número do Cartão SUS <strong>ou</strong> a Data de Nascimento para encontrar sua posição na fila de espera.</p>
+            <div>
+                <input type="text" id="sus-input" placeholder="Número do Cartão SUS">
+                <input type="text" id="dob-input" placeholder="Data de Nascimento (dd/mm/aaaa)">
+            </div>
+            <button id="query-btn" class="action-btn" style="margin-top: 15px;">Consultar Posição</button>
+            <div id="query-result"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+let fullProcessedData = [];
+let charts = {};
+
+// ======================= NOVO MÉTODO DE CARREGAMENTO =======================
+// Executa o script quando o conteúdo da página estiver totalmente carregado.
+window.addEventListener('DOMContentLoaded', () => {
+    const csvFilePath = 'listagem.csv'; // O nome do arquivo CSV
+
+    Papa.parse(csvFilePath, {
+        download: true, // Essencial para buscar o arquivo da URL/caminho
+        header: true,
+        skipEmptyLines: true,
+        complete: function(results) {
+            // Oculta a mensagem de carregamento e processa os dados
+            document.getElementById('loading-message').style.display = 'none';
+            const dashboardData = processData(results.data);
+            renderDashboard(dashboardData);
+        },
+        error: function(error) {
+            // Exibe uma mensagem de erro se não conseguir encontrar ou ler o arquivo
+            document.getElementById('loading-message').innerText = 'Erro ao carregar o arquivo listagem.csv. Verifique se o arquivo está no local correto e não contém erros.';
+            console.error("Erro ao processar o CSV:", error);
+        }
+    });
+});
+// =========================================================================
+
+function destroyChart(chartId) { if (charts[chartId]) { charts[chartId].destroy(); } }
+
+function parseDate(dateStr) {
+    if (!dateStr || typeof dateStr !== 'string' || dateStr.split('/').length !== 3) return null;
+    const parts = dateStr.split('/');
+    if (parts.some(p => isNaN(parseInt(p)))) return null;
+    return new Date(parts[2], parts[1] - 1, parts[0]);
+}
+
+function processData(data) {
+    const today = new Date();
+    const processed = data.map(row => {
+        const cleanRow = {
+            categoria: row['Categoria de Procedimento'], procedimento: row['Procedimento'],
+            solicitacao: row['Solic. Vaga'], cartaoSUS: String(row['Cartão SUS'] || '').trim(),
+            nascimento: row['Data Nasc.']
+        };
+        const dataNasc = parseDate(cleanRow.nascimento);
+        const dataSol = parseDate(cleanRow.solicitacao);
+        let age = dataNasc ? Math.floor((today.getTime() - dataNasc.getTime()) / (1000 * 60 * 60 * 24 * 365.25)) : null;
+        let daysInQueue = dataSol ? Math.floor((today.getTime() - dataSol.getTime()) / (1000 * 60 * 60 * 24)) : null;
+        return { ...cleanRow, age, daysInQueue, dataSolObj: dataSol };
+    }).filter(row => row.categoria && row.procedimento);
+    fullProcessedData = processed;
+    const validAges = processed.filter(p => p.age !== null && !isNaN(p.age));
+    const validWaits = processed.filter(p => p.daysInQueue !== null && !isNaN(p.daysInQueue));
+    const ageGroupCounts = validAges.reduce((acc, curr) => {
+        if (curr.age <= 12) acc.children++; else if (curr.age <= 17) acc.teens++;
+        else if (curr.age <= 59) acc.adults++; else acc.seniors++;
+        return acc;
+    }, { children: 0, teens: 0, adults: 0, seniors: 0 });
+    return {
+        totalRequests: processed.length, uniquePatients: new Set(processed.map(p => p.cartaoSUS).filter(Boolean)).size,
+        ageGroupCounts,
+        requestsByCategory: processed.reduce((acc, curr) => { acc[curr.categoria] = (acc[curr.categoria] || 0) + 1; return acc; }, {}),
+        ageDistribution: validAges.reduce((acc, curr) => {
+            let group = '91+';
+            if (curr.age <= 10) group = '0-10'; else if (curr.age <= 20) group = '11-20';
+            else if (curr.age <= 30) group = '21-30'; else if (curr.age <= 40) group = '31-40';
+            else if (curr.age <= 50) group = '41-50'; else if (curr.age <= 60) group = '51-60';
+            else if (curr.age <= 70) group = '61-70'; else if (curr.age <= 80) group = '71-80';
+            else if (curr.age <= 90) group = '81-90';
+            acc[group] = (acc[group] || 0) + 1;
+            return acc;
+        }, {}),
+        requestsOverTime: processed.reduce((acc, curr) => {
+            if (curr.dataSolObj) {
+                const monthYear = `${String(curr.dataSolObj.getMonth() + 1).padStart(2, '0')}/${curr.dataSolObj.getFullYear()}`;
+                acc[monthYear] = (acc[monthYear] || 0) + 1;
+            }
+            return acc;
+        }, {}),
+        longestWaitList: validWaits.sort((a, b) => b.daysInQueue - a.daysInQueue).slice(0, 20),
+        avgAge: validAges.reduce((sum, p) => sum + p.age, 0) / (validAges.length || 1),
+        avgWait: validWaits.reduce((sum, p) => sum + p.daysInQueue, 0) / (validWaits.length || 1),
+        maxWait: Math.max(0, ...validWaits.map(p => p.daysInQueue))
+    };
+}
+
+function renderDashboard(data) {
+    document.getElementById('kpi-total-requests').innerText = data.totalRequests.toLocaleString('pt-BR');
+    document.getElementById('kpi-unique-patients').innerText = data.uniquePatients.toLocaleString('pt-BR');
+    document.getElementById('kpi-avg-age').innerText = Math.round(data.avgAge);
+    document.getElementById('kpi-avg-wait').innerText = Math.round(data.avgWait);
+    document.getElementById('kpi-max-wait').innerText = data.maxWait.toLocaleString('pt-BR');
+    document.getElementById('kpi-children').innerText = data.ageGroupCounts.children.toLocaleString('pt-BR');
+    document.getElementById('kpi-teens').innerText = data.ageGroupCounts.teens.toLocaleString('pt-BR');
+    document.getElementById('kpi-adults').innerText = data.ageGroupCounts.adults.toLocaleString('pt-BR');
+    document.getElementById('kpi-seniors').innerText = data.ageGroupCounts.seniors.toLocaleString('pt-BR');
+    Chart.register(ChartDataLabels);
+    const chartOptions = { responsive: true, maintainAspectRatio: false };
+    destroyChart('categoryChart');
+    const categoryCtx = document.getElementById('categoryChart').getContext('2d');
+    const sortedCategories = Object.entries(data.requestsByCategory).sort(([,a],[,b]) => b-a);
+    charts['categoryChart'] = new Chart(categoryCtx, { type: 'bar', data: { labels: sortedCategories.map(item => item[0]), datasets: [{ label: 'Nº de Solicitações', data: sortedCategories.map(item => item[1]), backgroundColor: 'rgba(52, 152, 219, 0.7)' }] },
+        options: { ...chartOptions, indexAxis: 'y', plugins: { legend: { display: false }, datalabels: { anchor: 'end', align: 'end', color: '#444', font: { weight: 'bold' } } } }
+    });
+    destroyChart('ageDistributionChart');
+    const ageCtx = document.getElementById('ageDistributionChart').getContext('2d');
+    const ageLabels = ['0-10', '11-20', '21-30', '31-40', '41-50', '51-60', '61-70', '71-80', '81-90', '91+'];
+    charts['ageDistributionChart'] = new Chart(ageCtx, { type: 'bar', data: { labels: ageLabels, datasets: [{ label: 'Nº de Pacientes', data: ageLabels.map(label => data.ageDistribution[label] || 0), backgroundColor: 'rgba(46, 204, 113, 0.7)' }] },
+        options: { ...chartOptions, maintainAspectRatio: true, plugins: { legend: { display: true }, datalabels: { anchor: 'end', align: 'top', color: '#444', font: { weight: 'bold' } } } }
+    });
+    destroyChart('requestsOverTimeChart');
+    const timeCtx = document.getElementById('requestsOverTimeChart').getContext('2d');
+    const sortedTimeData = Object.entries(data.requestsOverTime).sort((a,b) => parseDate(`01/${a[0]}`) - parseDate(`01/${b[0]}`));
+    charts['requestsOverTimeChart'] = new Chart(timeCtx, { type: 'line', data: { labels: sortedTimeData.map(item => item[0]), datasets: [{ label: 'Volume de Solicitações', data: sortedTimeData.map(item => item[1]), fill: false, borderColor: 'rgba(155, 89, 182, 1)', tension: 0.1 }] },
+        options: { ...chartOptions, plugins: { datalabels: { display: false } } }
+    });
+    const tableBody = document.getElementById('waitlist-table').querySelector('tbody');
+    tableBody.innerHTML = '';
+    data.longestWaitList.forEach(item => {
+        const row = tableBody.insertRow();
+        row.innerHTML = `<td>${item.daysInQueue}</td><td>${item.solicitacao}</td><td>${item.procedimento}</td><td>${item.age !== null ? item.age : 'N/A'}</td><td>${item.cartaoSUS || 'N/A'}</td>`;
+    });
+}
+
+document.getElementById('query-btn').addEventListener('click', function() {
+    const susInput = document.getElementById('sus-input').value.trim();
+    const dobInput = document.getElementById('dob-input').value.trim();
+    const resultDiv = document.getElementById('query-result');
+    resultDiv.innerHTML = '';
+    if (!susInput && !dobInput) {
+        resultDiv.style.color = 'red';
+        resultDiv.innerText = 'Por favor, preencha pelo menos um dos campos para a consulta.';
+        return;
+    }
+    const patientRequests = fullProcessedData.filter(p => {
+        const susMatch = susInput && p.cartaoSUS === susInput;
+        const dobMatch = dobInput && p.nascimento === dobInput;
+        if (susInput && dobInput) return susMatch && dobMatch;
+        return susMatch || dobMatch;
+    });
+    if (patientRequests.length === 0) {
+        resultDiv.style.color = 'red';
+        resultDiv.innerText = 'Nenhuma solicitação encontrada. Verifique os dados e tente novamente.';
+        return;
+    }
+    resultDiv.style.color = '#2c3e50';
+    let resultsHtml = '';
+    patientRequests.forEach(request => {
+        const categoryQueue = fullProcessedData
+            .filter(p => p.categoria === request.categoria && p.dataSolObj)
+            .sort((a, b) => a.dataSolObj - b.dataSolObj);
+        const position = categoryQueue.findIndex(p => p.cartaoSUS === request.cartaoSUS && p.nascimento === request.nascimento && p.solicitacao === request.solicitacao) + 1;
+        const totalInQueue = categoryQueue.length;
+        resultsHtml += `
+            <div class="result-item">
+                <p><strong>Procedimento:</strong> ${request.procedimento}</p>
+                <p><strong>Fila da Categoria:</strong> ${request.categoria}</p>
+                <p style="font-size: 1.2em;">Sua posição é: <strong>${position} de ${totalInQueue}</strong>.</p>
+            </div>
+        `;
+    });
+    resultDiv.innerHTML = resultsHtml;
+});
+</script>
+
+</body>
+</html>
