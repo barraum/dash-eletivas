@@ -131,50 +131,111 @@
 <script>
 let fullProcessedData = [];
 let charts = {};
+let procedureToBoxMap = {}; // Mapa: Código do Procedimento -> Número da Caixa
 
 window.addEventListener('DOMContentLoaded', () => {
-    const csvFilePath = 'listagem.csv'; 
+    const listagemFile = 'listagem.csv';
+    const gruposFile = 'GRUPOS DE CIRURGIAS.csv';
 
-    Papa.parse(csvFilePath, {
-        download: true, header: true, skipEmptyLines: true,
-        complete: function(results) {
-            document.getElementById('loading-message').style.display = 'none';
-            const dashboardData = processData(results.data);
-            renderDashboard(dashboardData);
-        },
-        error: function(error) {
-            document.getElementById('loading-message').innerText = 'Erro ao carregar o arquivo listagem.csv. Verifique se o arquivo está no local correto e não contém erros.';
-            console.error("Erro ao processar o CSV:", error);
-        }
+    // Função auxiliar para carregar CSV
+    const loadCSV = (file, options) => {
+        return new Promise((resolve, reject) => {
+            Papa.parse(file, {
+                download: true,
+                header: true,
+                skipEmptyLines: true,
+                ...options,
+                complete: (results) => resolve(results.data),
+                error: (error) => reject(error)
+            });
+        });
+    };
+
+    Promise.all([
+        loadCSV(gruposFile, { delimiter: ';' }), // Arquivo de grupos usa ponto e vírgula
+        loadCSV(listagemFile)                    // Listagem usa ponto e vírgula ou detecção automática
+    ]).then(([gruposData, listagemData]) => {
+        
+        // 1. Criar o Mapa usando o CÓDIGO como chave
+        createProcedureMap(gruposData);
+
+        // 2. Processar a listagem extraindo o código da string
+        document.getElementById('loading-message').style.display = 'none';
+        const dashboardData = processData(listagemData);
+        renderDashboard(dashboardData);
+
+    }).catch(error => {
+        document.getElementById('loading-message').innerText = 'Erro ao carregar arquivos. Verifique o console (F12) para detalhes.';
+        console.error("Erro no carregamento:", error);
     });
 });
+
+function createProcedureMap(data) {
+    data.forEach(row => {
+        // Usa a coluna 'Codigo Procedimento' do arquivo de grupos
+        if (row['Codigo Procedimento'] && row['Caixa']) {
+            const code = row['Codigo Procedimento'].trim(); 
+            procedureToBoxMap[code] = row['Caixa'].trim();
+        }
+    });
+    console.log("Mapa de Caixas (por Código) gerado com sucesso.");
+}
 
 function destroyChart(chartId) { if (charts[chartId]) { charts[chartId].destroy(); } }
 
 function parseDate(dateStr) {
-    if (!dateStr || typeof dateStr !== 'string' || dateStr.split('/').length !== 3) return null;
-    const parts = dateStr.split('/');
-    if (parts.some(p => isNaN(parseInt(p)))) return null;
+    if (!dateStr || typeof dateStr !== 'string') return null;
+    // Tenta limpar espaços e pegar apenas a data se houver lixo
+    const cleanDate = dateStr.trim().split(' ')[0]; 
+    const parts = cleanDate.split('/');
+    if (parts.length !== 3) return null;
     return new Date(parts[2], parts[1] - 1, parts[0]);
 }
 
 function processData(data) {
     const today = new Date();
+    
     const processed = data.map(row => {
+        const rawProcString = row['Procedimento'] || '';
+        
+        // --- LÓGICA DE EXTRAÇÃO DO CÓDIGO ---
+        // O formato é "CODIGO - DESCRICAO". Vamos pegar o que está antes do " - "
+        let extractedCode = '';
+        if (rawProcString.includes(' - ')) {
+            extractedCode = rawProcString.split(' - ')[0].trim();
+        } else {
+            // Caso não tenha o separador, tenta pegar a primeira palavra (fallback)
+            extractedCode = rawProcString.split(' ')[0].trim();
+        }
+
+        // Busca a caixa usando o código extraído
+        const caixaId = procedureToBoxMap[extractedCode] || 'ND';
+
         const cleanRow = {
-            categoria: row['Categoria de Procedimento'], procedimento: row['Procedimento'],
-            solicitacao: row['Solic. Vaga'], cartaoSUS: String(row['Cartão SUS'] || '').trim(),
+            categoria: row['Categoria de Procedimento'], 
+            procedimento: rawProcString, // Mantém o texto completo para exibição
+            codigo: extractedCode,       // Guarda o código separado
+            caixa: caixaId, 
+            solicitacao: row['Solic. Vaga'], 
+            cartaoSUS: String(row['Cartão SUS'] || '').trim().replace(',', '.'), // Trata notação científica se ocorrer
             nascimento: row['Data Nasc.']
         };
+
         const dataNasc = parseDate(cleanRow.nascimento);
         const dataSol = parseDate(cleanRow.solicitacao);
+        
         let age = dataNasc ? Math.floor((today.getTime() - dataNasc.getTime()) / (1000 * 60 * 60 * 24 * 365.25)) : null;
         let daysInQueue = dataSol ? Math.floor((today.getTime() - dataSol.getTime()) / (1000 * 60 * 60 * 24)) : null;
+        
         return { ...cleanRow, age, daysInQueue, dataSolObj: dataSol };
     }).filter(row => row.categoria && row.procedimento);
+
     fullProcessedData = processed;
+
+    // --- Estatísticas Gerais ---
     const validAges = processed.filter(p => p.age !== null && !isNaN(p.age));
     const validWaits = processed.filter(p => p.daysInQueue !== null && !isNaN(p.daysInQueue));
+    
     const ageGroupCounts = validAges.reduce((acc, curr) => {
         if (curr.age <= 12) acc.children++; else if (curr.age <= 17) acc.teens++;
         else if (curr.age <= 59) acc.adults++; else acc.seniors++;
@@ -182,24 +243,18 @@ function processData(data) {
     }, { children: 0, teens: 0, adults: 0, seniors: 0 });
     
     return {
-        totalRequests: processed.length, uniquePatients: new Set(processed.map(p => p.cartaoSUS).filter(Boolean)).size,
+        totalRequests: processed.length, 
+        uniquePatients: new Set(processed.map(p => p.cartaoSUS).filter(Boolean)).size,
         ageGroupCounts,
         requestsByCategory: processed.reduce((acc, curr) => { acc[curr.categoria] = (acc[curr.categoria] || 0) + 1; return acc; }, {}),
-        
-        // ======================= ALTERAÇÃO REALIZADA AQUI =======================
         ageDistribution: validAges.reduce((acc, curr) => {
-            if (curr.age >= 90) {
-                acc['90+'] = (acc['90+'] || 0) + 1;
-            } else {
-                const startOfDecade = Math.floor(curr.age / 10) * 10;
-                const endOfDecade = startOfDecade + 9;
-                const group = `${startOfDecade}-${endOfDecade}`;
+            if (curr.age >= 90) { acc['90+'] = (acc['90+'] || 0) + 1; } 
+            else {
+                const group = `${Math.floor(curr.age / 10) * 10}-${Math.floor(curr.age / 10) * 10 + 9}`;
                 acc[group] = (acc[group] || 0) + 1;
             }
             return acc;
         }, {}),
-        // ========================================================================
-        
         requestsOverTime: processed.reduce((acc, curr) => {
             if (curr.dataSolObj) {
                 const monthYear = `${String(curr.dataSolObj.getMonth() + 1).padStart(2, '0')}/${curr.dataSolObj.getFullYear()}`;
@@ -224,8 +279,10 @@ function renderDashboard(data) {
     document.getElementById('kpi-teens').innerText = data.ageGroupCounts.teens.toLocaleString('pt-BR');
     document.getElementById('kpi-adults').innerText = data.ageGroupCounts.adults.toLocaleString('pt-BR');
     document.getElementById('kpi-seniors').innerText = data.ageGroupCounts.seniors.toLocaleString('pt-BR');
+    
     Chart.register(ChartDataLabels);
     const chartOptions = { responsive: true, maintainAspectRatio: false };
+    
     destroyChart('categoryChart');
     const categoryCtx = document.getElementById('categoryChart').getContext('2d');
     const sortedCategories = Object.entries(data.requestsByCategory).sort(([,a],[,b]) => b-a);
@@ -235,9 +292,7 @@ function renderDashboard(data) {
     
     destroyChart('ageDistributionChart');
     const ageCtx = document.getElementById('ageDistributionChart').getContext('2d');
-    // ======================= ALTERAÇÃO REALIZADA AQUI =======================
     const ageLabels = ['0-9', '10-19', '20-29', '30-39', '40-49', '50-59', '60-69', '70-79', '80-89', '90+'];
-    // ========================================================================
     charts['ageDistributionChart'] = new Chart(ageCtx, { type: 'bar', data: { labels: ageLabels, datasets: [{ label: 'Nº de Pacientes', data: ageLabels.map(label => data.ageDistribution[label] || 0), backgroundColor: 'rgba(46, 204, 113, 0.7)' }] },
         options: { ...chartOptions, maintainAspectRatio: true, plugins: { legend: { display: true }, datalabels: { anchor: 'end', align: 'top', color: '#444', font: { weight: 'bold' } } } }
     });
@@ -248,6 +303,7 @@ function renderDashboard(data) {
     charts['requestsOverTimeChart'] = new Chart(timeCtx, { type: 'line', data: { labels: sortedTimeData.map(item => item[0]), datasets: [{ label: 'Volume de Solicitações', data: sortedTimeData.map(item => item[1]), fill: false, borderColor: 'rgba(155, 89, 182, 1)', tension: 0.1 }] },
         options: { ...chartOptions, plugins: { datalabels: { display: false } } }
     });
+    
     const tableBody = document.getElementById('waitlist-table').querySelector('tbody');
     tableBody.innerHTML = '';
     data.longestWaitList.forEach(item => {
@@ -261,38 +317,72 @@ document.getElementById('query-btn').addEventListener('click', function() {
     const dobInput = document.getElementById('dob-input').value.trim();
     const resultDiv = document.getElementById('query-result');
     resultDiv.innerHTML = '';
+
     if (!susInput && !dobInput) {
         resultDiv.style.color = 'red';
         resultDiv.innerText = 'Por favor, preencha pelo menos um dos campos para a consulta.';
         return;
     }
+
+    // Tratamento para números de cartão SUS que vêm em notação científica no CSV
+    // Ex: "7,03E+14" deve ser tratado com cuidado na comparação se o usuário digitar o número completo
+    // O código abaixo assume comparação de strings exata.
+    
     const patientRequests = fullProcessedData.filter(p => {
-        const susMatch = susInput && p.cartaoSUS === susInput;
+        const susMatch = susInput && (p.cartaoSUS === susInput || p.cartaoSUS.replace(',', '.') === susInput);
         const dobMatch = dobInput && p.nascimento === dobInput;
         if (susInput && dobInput) return susMatch && dobMatch;
         return susMatch || dobMatch;
     });
+
     if (patientRequests.length === 0) {
         resultDiv.style.color = 'red';
         resultDiv.innerText = 'Nenhuma solicitação encontrada. Verifique os dados e tente novamente.';
         return;
     }
+
     resultDiv.style.color = '#2c3e50';
     let resultsHtml = '';
+
     patientRequests.forEach(request => {
-        const categoryQueue = fullProcessedData
-            .filter(p => p.categoria === request.categoria && p.dataSolObj)
-            .sort((a, b) => a.dataSolObj - b.dataSolObj);
-        const position = categoryQueue.findIndex(p => p.cartaoSUS === request.cartaoSUS && p.nascimento === request.nascimento && p.solicitacao === request.solicitacao) + 1;
-        const totalInQueue = categoryQueue.length;
-        resultsHtml += `
-            <div class="result-item">
+        const userCaixa = request.caixa;
+        
+        if (userCaixa === 'ND') {
+            resultsHtml += `
+            <div class="result-item" style="border-left: 5px solid #e74c3c;">
                 <p><strong>Procedimento:</strong> ${request.procedimento}</p>
-                <p><strong>Fila da Categoria:</strong> ${request.categoria}</p>
-                <p style="font-size: 1.2em;">Sua posição é: <strong>${position} de ${totalInQueue}</strong>.</p>
-            </div>
-        `;
+                <p><strong>Código identificado:</strong> ${request.codigo}</p>
+                <p style="color: #c0392b;">Este procedimento não foi encontrado na tabela de Caixas (Grupos). Verifique se o código está correto no arquivo de Grupos.</p>
+            </div>`;
+        } else {
+            // Filtra TODOS os pacientes da MESMA CAIXA e ordena pela data de solicitação
+            const boxQueue = fullProcessedData
+                .filter(p => p.caixa === userCaixa && p.dataSolObj)
+                .sort((a, b) => a.dataSolObj - b.dataSolObj);
+            
+            // Encontra posição
+            const position = boxQueue.findIndex(p => 
+                p.cartaoSUS === request.cartaoSUS && 
+                p.nascimento === request.nascimento && 
+                p.solicitacao === request.solicitacao &&
+                p.codigo === request.codigo
+            ) + 1;
+
+            const totalInQueue = boxQueue.length;
+
+            resultsHtml += `
+                <div class="result-item" style="border-left: 5px solid #2ecc71;">
+                    <p><strong>Procedimento:</strong> ${request.procedimento}</p>
+                    <p><strong>Código:</strong> ${request.codigo} | <strong>Caixa:</strong> ${userCaixa}</p>
+                    <p style="font-size: 1.2em; margin-top: 10px;">
+                        Posição na fila da <strong>Caixa ${userCaixa}</strong>: 
+                        <br><span style="font-size: 1.5em; color: #27ae60;">#${position}</span> de ${totalInQueue} pacientes.
+                    </p>
+                </div>
+            `;
+        }
     });
+
     resultDiv.innerHTML = resultsHtml;
 });
 </script>
