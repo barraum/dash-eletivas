@@ -85,7 +85,7 @@
         <strong>Fonte:</strong> Secretaria da Saúde de Franca. 
         Disponível em: <a href="https://www3.franca.sp.gov.br/noticia/30821/cirurgias-eletivas.html" target="_blank">Portal da Prefeitura de Franca</a>. 
         <br>
-        <small>Dados atualizados em dezembro de 2025.</small>
+        <small>Dados atualizados em janeiro de 2026.</small>
     </p>
     <h2 id="loading-message">Carregando dados do arquivo listagem.csv...</h2>
 
@@ -352,6 +352,7 @@ document.getElementById('query-btn').addEventListener('click', function() {
             <div class="result-item" style="border-left: 5px solid #e74c3c;">
                 <p><strong>Procedimento:</strong> ${request.procedimento}</p>
                 <p><strong>Código identificado:</strong> ${request.codigo}</p>
+                <p><strong>Data da Solicitação:</strong> ${request.solicitacao}</p>
                 <p style="color: #c0392b;">Este procedimento não foi encontrado na tabela de Caixas (Grupos). Verifique se o código está correto no arquivo de Grupos.</p>
             </div>`;
         } else {
@@ -374,6 +375,7 @@ document.getElementById('query-btn').addEventListener('click', function() {
                 <div class="result-item" style="border-left: 5px solid #2ecc71;">
                     <p><strong>Procedimento:</strong> ${request.procedimento}</p>
                     <p><strong>Código:</strong> ${request.codigo} | <strong>Caixa:</strong> ${userCaixa}</p>
+                    <p><strong>Data da Solicitação:</strong> ${request.solicitacao}</p>
                     <p style="font-size: 1.2em; margin-top: 10px;">
                         Posição na fila da <strong>Caixa ${userCaixa}</strong>: 
                         <br><span style="font-size: 1.5em; color: #27ae60;">#${position}</span> de ${totalInQueue} pacientes.
