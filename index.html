@@ -244,7 +244,20 @@ function processData(data) {
     
     return {
         totalRequests: processed.length, 
-        uniquePatients: new Set(processed.map(p => p.cartaoSUS).filter(Boolean)).size,
+        
+        // --- NOVA LÓGICA DE PACIENTES ÚNICOS ---
+        uniquePatients: new Set(processed.map(p => {
+            const sus = p.cartaoSUS || 'SEM_SUS';
+            const nasc = p.nascimento || 'SEM_NASC';
+            
+            // Se por acaso a linha não tiver nem SUS nem Nascimento, gera um ID único
+            // para não agrupar indevidamente.
+            if (sus === 'SEM_SUS' && nasc === 'SEM_NASC') {
+                return Math.random().toString();
+            }
+            // Cria uma "assinatura" do paciente (Ex: 70312345678_15/05/1980)
+            return `${sus}_${nasc}`;
+        })).size,
         ageGroupCounts,
         requestsByCategory: processed.reduce((acc, curr) => { acc[curr.categoria] = (acc[curr.categoria] || 0) + 1; return acc; }, {}),
         ageDistribution: validAges.reduce((acc, curr) => {
